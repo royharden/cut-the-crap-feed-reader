@@ -1,0 +1,10 @@
+project_id = "cut-the-crap"
+
+[functions.feeds]
+verify_jwt = false
+
+[functions.jev-score]
+verify_jwt = false
+
+[functions.llm]
+verify_jwt = false
