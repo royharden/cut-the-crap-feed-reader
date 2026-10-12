@@ -123,7 +123,7 @@ export default function FeedCard({ item, blurred, rank, onOpen, onWhy, whyLoadin
               {whyLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <HelpCircle className="h-3 w-3" />}
               why
             </button>
-            {item.url && (
+            {/^https?:\/\//i.test(item.url) && (
               <a
                 href={item.url}
                 target="_blank"

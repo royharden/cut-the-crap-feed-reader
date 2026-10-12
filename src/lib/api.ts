@@ -15,31 +15,31 @@ export interface JevScoreResult {
   cost_usd: number;
 }
 
-export async function refreshFeeds(mode: "live" | "offline", feeds: string[]): Promise<FeedResult> {
-  const { data, error } = await supabase.functions.invoke("feeds", {
-    body: { mode, feeds },
-  });
+/** Calls an Edge Function (anon JWT attached by supabase-js) and surfaces its error message. */
+async function invoke<T>(fn: string, body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke(fn, { body });
   if (error) {
     const ctx = (error as unknown as { context?: Response }).context;
     if (ctx && ctx.status === 429) throw new Error("Daily demo limit reached");
-    throw new Error(error.message);
+    let message = error.message;
+    try {
+      const payload = ctx ? await ctx.json() : null;
+      if (payload && typeof payload.error === "string") message = payload.error;
+    } catch { /* non-JSON error body */ }
+    throw new Error(message);
   }
-  return data as FeedResult;
+  return data as T;
+}
+
+export async function refreshFeeds(mode: "live" | "offline", feeds: string[]): Promise<FeedResult> {
+  return invoke<FeedResult>("feeds", { mode, feeds });
 }
 
 export async function scoreBatch(
   interests: string,
   items: Array<{ item_id: string; title: string; snippet: string; source: string }>
 ): Promise<JevScoreResult> {
-  const { data, error } = await supabase.functions.invoke("jev-score", {
-    body: { reader_interests: interests, items },
-  });
-  if (error) {
-    const ctx = (error as unknown as { context?: Response }).context;
-    if (ctx && ctx.status === 429) throw new Error("Daily demo limit reached");
-    throw new Error(error.message);
-  }
-  return data as JevScoreResult;
+  return invoke<JevScoreResult>("jev-score", { reader_interests: interests, items });
 }
 
 export async function askWhy(item: {
@@ -48,15 +48,8 @@ export async function askWhy(item: {
   source: string;
   signal: number | null;
 }, interests: string, mock: boolean): Promise<string> {
-  const { data, error } = await supabase.functions.invoke("llm", {
-    body: { action: "why", item, reader_interests: interests, mock },
-  });
-  if (error) {
-    const ctx = (error as unknown as { context?: Response }).context;
-    if (ctx && ctx.status === 429) throw new Error("Daily demo limit reached");
-    throw new Error(error.message);
-  }
-  return (data as { text: string }).text;
+  const data = await invoke<{ text: string }>("llm", { action: "why", item, reader_interests: interests, mock });
+  return data.text;
 }
 
 export async function askDigest(
@@ -64,15 +57,8 @@ export async function askDigest(
   interests: string,
   mock: boolean
 ): Promise<string[]> {
-  const { data, error } = await supabase.functions.invoke("llm", {
-    body: { action: "digest", items, reader_interests: interests, mock },
-  });
-  if (error) {
-    const ctx = (error as unknown as { context?: Response }).context;
-    if (ctx && ctx.status === 429) throw new Error("Daily demo limit reached");
-    throw new Error(error.message);
-  }
-  return (data as { bullets: string[] }).bullets;
+  const data = await invoke<{ bullets: string[] }>("llm", { action: "digest", items, reader_interests: interests, mock });
+  return data.bullets;
 }
 
 export async function fetchItems(): Promise<Item[]> {
@@ -101,7 +87,16 @@ export async function fetchBatches(): Promise<BatchRow[]> {
   return (data ?? []) as BatchRow[];
 }
 
+// Writes go through the feeds Edge Function (service role); the browser only has read access.
+
 export async function recordFeedback(itemId: string, kind: "false_hide" | "false_keep"): Promise<void> {
-  const { error } = await supabase.from("feedback").insert({ item_id: itemId, kind });
-  if (error) throw new Error(error.message);
+  await invoke("feeds", { action: "feedback", item_id: itemId, kind });
+}
+
+export async function addSource(url: string): Promise<void> {
+  await invoke("feeds", { action: "add_source", url });
+}
+
+export async function removeSource(id: string): Promise<void> {
+  await invoke("feeds", { action: "remove_source", id });
 }

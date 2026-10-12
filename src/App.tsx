@@ -81,7 +81,8 @@ export default function App() {
       const its = await api.fetchItems();
       const scs = await api.fetchScores();
       const scored = new Set(scs.map((s) => s.item_id));
-      const toScore = its.filter((it) => !scored.has(it.id));
+      // Offline demo items arrive pre-scored; only Live mode calls Jev.
+      const toScore = mode === "live" ? its.filter((it) => !scored.has(it.id)) : [];
 
       const chunks: typeof toScore[] = [];
       for (let i = 0; i < toScore.length; i += 10) chunks.push(toScore.slice(i, i + 10));
@@ -296,13 +297,13 @@ export default function App() {
               sources={sources}
               onAdd={async (url) => {
                 try {
-                  await supabaseInsertSource(url);
+                  await api.addSource(url);
                   await reload();
                 } catch (e) { setError((e as Error).message); }
               }}
               onRemove={async (id) => {
                 try {
-                  await supabaseDeleteSource(id);
+                  await api.removeSource(id);
                   await reload();
                 } catch (e) { setError((e as Error).message); }
               }}
@@ -368,14 +369,4 @@ async function supabaseSources(): Promise<Array<{ id: string; url: string; enabl
   const { data, error } = await supabase.from("sources").select("id, url, enabled").order("created_at");
   if (error) throw new Error(error.message);
   return data ?? [];
-}
-
-async function supabaseInsertSource(url: string): Promise<void> {
-  const { error } = await supabase.from("sources").insert({ url });
-  if (error) throw new Error(error.message);
-}
-
-async function supabaseDeleteSource(id: string): Promise<void> {
-  const { error } = await supabase.from("sources").delete().eq("id", id);
-  if (error) throw new Error(error.message);
 }

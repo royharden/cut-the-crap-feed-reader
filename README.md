@@ -11,7 +11,7 @@ Cut the Crap is a full-stack demo feed reader that pulls Hacker News and RSS ite
 ```mermaid
 graph TD
     UI[React UI<br/>dark reader feed]
-    F[feeds function<br/>HN + RSS fetch, normalize, upsert]
+    F[feeds function<br/>HN + RSS fetch, normalize, upsert,<br/>sources + feedback writes]
     J[jev-score function<br/>batched TypeSafe System One calls]
     L[llm function<br/>why + digest, on demand]
     DB[(Supabase Postgres<br/>items, scores, batches,<br/>feedback, sources, usage_counters)]
@@ -23,7 +23,7 @@ graph TD
     J --> DB
     J --> TS[api.typesafe.ai<br/>jev-1.13.0]
     L --> OA[OpenAI API<br/>optional, mocked without key]
-    UI -->|direct reads/writes| DB
+    UI -->|read-only queries| DB
 ```
 
 ## Why a fast calibrated scorer beats asking an LLM to rate every item
@@ -36,17 +36,18 @@ graph TD
 ## Setup
 
 1. Create a Supabase project and note the URL + anon key.
-2. Set secrets:
+2. Apply the migrations in `supabase/migrations` (`supabase db push`).
+3. Set secrets (all optional — without them the app runs in Offline demo / Mock LLM mode):
    ```bash
-   supabase secrets set TYPESAFE_API_KEY=... OPENAI_API_KEY=...
+   supabase secrets set TYPESAFE_API_KEY=... OPENAI_API_KEY=... DAILY_CALL_LIMIT=200
    ```
-3. Deploy the three edge functions:
+4. Deploy the three edge functions (JWT verification is on for all of them via `supabase/config.toml`):
    ```bash
    supabase functions deploy feeds
    supabase functions deploy jev-score
    supabase functions deploy llm
    ```
-4. Run locally:
+5. Run locally:
    ```bash
    npm install
    npm run dev
@@ -62,7 +63,7 @@ graph TD
 | `OPENAI_API_KEY` | edge function secret | LLM for "why" + digest (mocked if absent) |
 | `OPENAI_BASE_URL` | edge function secret | Optional; defaults to `https://api.openai.com/v1` |
 | `OPENAI_MODEL` | edge function secret | Optional; defaults to `gpt-4o-mini` |
-| `DAILY_CALL_LIMIT` | edge function secret | Optional; default 200 calls/day per function |
+| `DAILY_CALL_LIMIT` | edge function secret | Optional; default 200 paid upstream calls/day per function |
 
 ## Screenshots
 
@@ -76,5 +77,6 @@ graph TD
 
 - **Batching 10 items per request.** Jev prices per request, so packing 10 items × 5 questions into one call amortizes overhead. If a batch is rejected for size, it is split in half and retried.
 - **Scoring once per item.** Scores live in a table keyed by item, so refreshes only score new arrivals. Existing items keep their scores forever.
-- **The daily cap.** `jev-score` and `llm` increment a `usage_counters` row before doing any work; past `DAILY_CALL_LIMIT` (200) they return HTTP 429 and the UI shows a friendly banner and flips to Offline demo mode.
-- **Offline demo fallback.** A bundle of 40 hand-written items (solid posts, slop listicles, rage bait, launches) ships inside the `feeds` function. It loads with pre-scored answers, so the full UI is explorable even with zero API access.
+- **The daily cap.** `jev-score` and `llm` atomically increment a `usage_counters` row (via the service-role-only `increment_usage_counter` function) right before every paid TypeSafe/OpenAI request, retries included. Past `DAILY_CALL_LIMIT` (200) they return HTTP 429 and the UI shows a friendly banner and flips to Offline demo mode. If the counter can't be read the call fails closed with HTTP 503.
+- **Security model.** The browser only reads tables with the anon key; every write (items, scores, batches, sources, feedback) goes through an Edge Function using the service-role key, with whitelisted columns and bounded payloads. `usage_counters` is not readable or writable by clients at all. User-added feed URLs are fetched through an SSRF guard (http(s) only, DNS-checked on every redirect hop, private/metadata ranges blocked, 10 s timeout, 2 MB cap).
+- **Offline demo fallback.** A bundle of 40 hand-written items (solid posts, slop listicles, rage bait, launches) ships inside the `feeds` function. It loads with pre-scored answers (written by the `feeds` function), so the full UI is explorable even with zero API access.

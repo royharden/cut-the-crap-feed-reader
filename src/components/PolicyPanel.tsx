@@ -64,6 +64,7 @@ export default function PolicyPanel({ policy, onChange }: Props) {
         <textarea
           value={policy.interests}
           onChange={(e) => set({ interests: e.target.value })}
+          maxLength={500}
           rows={2}
           className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-amber-600 focus:outline-none"
           placeholder="AI agents, developer tools, databases, startups"
